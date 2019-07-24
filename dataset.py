@@ -1,4 +1,5 @@
 import sys
+import multiprocessing
 import json
 import jieba
 import mxnet as mx
@@ -54,13 +55,14 @@ def batches(dataset, vocab, batch_size, fine_size, load_size, sequence_length, c
     batches = len(dataset) // batch_size
     if batches * batch_size < len(dataset):
         batches += 1
-    for i in range(batches):
-        start = i * batch_size
-        imgs = [cook_image(load_image(img), fine_size, load_size).T.expand_dims(0) for img in img_path[start: start + batch_size]]
-        tgt_bat = mx.nd.array(_pad_batch(_add_sent_prefix(tgt_tok[start: start + batch_size], vocab), vocab, sequence_length + 1), ctx=ctx)
-        tgt_len_bat = mx.nd.array(tgt_len[start: start + batch_size], ctx=ctx) + 1
-        lbl_bat = mx.nd.array(_pad_batch(_add_sent_suffix(tgt_tok[start: start + batch_size], vocab), vocab, sequence_length + 1), ctx=ctx)
-        yield mx.nd.concat(*imgs, dim=0).as_in_context(ctx), tgt_bat, tgt_len_bat, lbl_bat
+    with multiprocessing.Pool(multiprocessing.cpu_count() * 2) as p:
+        for i in range(batches):
+            start = i * batch_size
+            imgs = p.map(_CookingWorker(fine_size, load_size), img_path[start: start + batch_size])
+            tgt_bat = mx.nd.array(_pad_batch(_add_sent_prefix(tgt_tok[start: start + batch_size], vocab), vocab, sequence_length + 1), ctx=ctx)
+            tgt_len_bat = mx.nd.array(tgt_len[start: start + batch_size], ctx=ctx) + 1
+            lbl_bat = mx.nd.array(_pad_batch(_add_sent_suffix(tgt_tok[start: start + batch_size], vocab), vocab, sequence_length + 1), ctx=ctx)
+            yield mx.nd.concat(*imgs, dim=0).as_in_context(ctx), tgt_bat, tgt_len_bat, lbl_bat
 
 def _add_sent_prefix(batch, vocab):
     return [[vocab.word2idx("<GO>")] + sent for sent in batch]
@@ -70,6 +72,15 @@ def _add_sent_suffix(batch, vocab):
 
 def _pad_batch(batch, vocab, seq_len):
     return [sent + [vocab.word2idx("<PAD>")] * (seq_len - len(sent)) for sent in batch]
+
+
+class _CookingWorker:
+    def __init__(self, fine_size, load_size):
+        self._fine_size = fine_size
+        self._load_size = load_size
+
+    def __call__(self, img):
+        return cook_image(load_image(img), self._fine_size, self._load_size).T.expand_dims(0)
 
 
 if __name__ == "__main__":
