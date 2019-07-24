@@ -106,6 +106,9 @@ venv.bak/
 # data directory
 data/
 
+# check-point files
+*.state
+
 # output and backup files
 *.out
 *.bak
