@@ -1,24 +1,40 @@
 import math
 import argparse
+import numpy as np
 import mxnet as mx
+import matplotlib.pyplot as plt
 from vocab import Vocabulary
 from dataset import load_image, cook_image
 from img2seq import FeatureExtractor, Feature2seqTransformer
+
+
+def visualize(img):
+    mean = mx.nd.array([0.485, 0.456, 0.406])
+    std = mx.nd.array([0.229, 0.224, 0.225])
+    plt.imshow(((img * std + mean) * 255).asnumpy().astype(np.uint8))
+    plt.axis("off")
+
+
+parser = argparse.ArgumentParser(description="Start a ai_challenger_caption tester.")
+parser.add_argument("images", metavar="IMG", help="path of the image file[s]", type=str, nargs="+")
+parser.add_argument("--beam", help="using beam search", action="store_true")
+parser.add_argument("--beam_size", help="set the size of beam (default: 10)", type=int, default=10)
+parser.add_argument("--visualize", help="visualizing the images", action="store_true")
+parser.add_argument("--device_id", help="select device that the model using (default: 0)", type=int, default=0)
+parser.add_argument("--gpu", help="using gpu acceleration", action="store_true")
+args = parser.parse_args()
 
 fine_size = (224, 224)
 load_size = (256, 256)
 feature_length = 49
 sequence_length = 32
 beam_size = 10
-
-parser = argparse.ArgumentParser(description="Start a ai_challenger_caption tester.")
-parser.add_argument("images", metavar="IMG", help="path of the image file[s]", type=str, nargs="+")
-parser.add_argument("--beam", help="using beam search", action="store_true")
-parser.add_argument("--beam_size", help="set the size of beam (default: 10)", type=int, default=10)
-parser.add_argument("--device_id", help="select device that the model using (default: 0)", type=int, default=0)
-parser.add_argument("--gpu", help="using gpu acceleration", action="store_true")
-args = parser.parse_args()
-
+if len(args.images) <= 4:
+    rows = 1
+    cols = len(args.images)
+else:
+    rows = math.ceil(len(args.images) / 4)
+    cols = 4
 if args.gpu:
     context = mx.gpu(args.device_id)
 else:
@@ -33,9 +49,14 @@ features = FeatureExtractor(ctx=context)
 model = Feature2seqTransformer(feature_length, vocab.size(), sequence_length)
 model.load_parameters("model/img2seq.params", ctx=context)
 
+index = 0
 for path in args.images:
+    index += 1
     print(path)
     image = cook_image(load_image(path), fine_size, load_size)
+    if args.visualize:
+        plt.subplot(rows, cols, index)
+        visualize(image)
     image = image.T.expand_dims(0).as_in_context(context)
     source = features(image)
     enc_out, enc_self_attn = model.encode(source)
@@ -84,3 +105,6 @@ for path in args.images:
             print(vocab.idx2word(word_token), end="", flush=True)
         print("") 
         print(sequence)
+
+if args.visualize:
+    plt.show()
